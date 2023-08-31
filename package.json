@@ -1,0 +1,36 @@
+{
+  "name": "eris",
+  "version": "1.0.0",
+  "description": "",
+  "main": "lib/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "_() { tsc-watch --onSuccess \"node lib/index.js \\\"$@\\\"\" ; } ; _"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/apaleslimghost/eris.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/apaleslimghost/eris/issues"
+  },
+  "homepage": "https://github.com/apaleslimghost/eris#readme",
+  "devDependencies": {
+    "@quarterto/prettier": "^1.1.0",
+    "@slack/web-api": "^6.9.0",
+    "@tsconfig/node18": "^18.2.1",
+    "prettier": "^3.0.3",
+    "ts-node": "^10.9.1",
+    "tsc-watch": "^6.0.4",
+    "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "discord.js": "^14.13.0"
+  },
+  "volta": {
+    "node": "18.17.1"
+  }
+}
