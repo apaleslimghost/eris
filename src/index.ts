@@ -1,6 +1,6 @@
 import fs from 'fs/promises'
 import path from 'path'
-import Slack from '@slack/web-api'
+import Slack, { Block } from '@slack/web-api'
 import yargs from 'yargs/yargs'
 
 const argv = yargs(process.argv.slice(2)).options({
@@ -18,10 +18,7 @@ async function readChannels(): Promise<Slack.ChannelsListResponse['channels']> {
 	return JSON.parse(await fs.readFile(path.join(argv.archive, 'channels.json'), 'utf-8'))
 }
 
-type ArrayElement<ArrayType extends readonly unknown[]> =
-  ArrayType extends readonly (infer ElementType)[] ? ElementType : never;
-
-type SlackMessage = ArrayElement<Exclude<Slack.ChannelsHistoryResponse['messages'], undefined>> & { user_profile: Slack.UsersProfileGetResponse['profile'] }
+type SlackMessage = Exclude<Slack.ChannelsHistoryResponse['messages'], undefined>[number] & { user_profile: Slack.UsersProfileGetResponse['profile'] }
 
 async function readChannelMessages(channel: string): Promise<SlackMessage[]> {
 	const channelDir = path.join(argv.archive, channel)
@@ -36,11 +33,13 @@ async function readChannelMessages(channel: string): Promise<SlackMessage[]> {
 	)).flat()
 }
 
-async function readUsers(): Promise<Slack.UsersListResponse['members']> {
+type Member = Exclude<Slack.UsersListResponse['members'], undefined>[number]
+
+async function readUsers(): Promise<Member[]> {
 	return JSON.parse(await fs.readFile(path.join(argv.archive, 'users.json'), 'utf-8'))
 }
 
-import {CategoryChannel, Channel, ChannelType, Client, Events, GatewayIntentBits, Guild, GuildChannelCreateOptions, Message, MessagePayload, TextChannel, Webhook, WebhookMessageCreateOptions} from 'discord.js'
+import {CategoryChannel, Channel, ChannelType, Client, Events, GatewayIntentBits, Guild, GuildChannelCreateOptions, Message, MessagePayload, TextChannel, Webhook, WebhookMessageCreateOptions, inlineCode, italic} from 'discord.js'
 
 import Logger from 'komatsu'
 const logger = new Logger()
@@ -73,12 +72,30 @@ async function createOrReturnChannel(guild: Guild, options: GuildChannelCreateOp
 	}
 }
 
-// TODO: rich text, files, timestamps, reactions
-function renderDiscordMessage(message: SlackMessage): WebhookMessageCreateOptions {
+const getUserName = (profile: Member['profile']): string => profile?.display_name || profile?.real_name || 'Slack User'
+
+function parseMentions(text: string, users: Member[]): string {
+	return text.replaceAll(/<@(U[\dA-Z]{8})>/g, (_, id) => {
+		const user = users.find(u => u.id === id)
+		return '@' + getUserName(user?.profile)
+	})
+}
+
+// TODO: rich text, files, timestamps, reactions, threads
+function renderDiscordMessage(message: SlackMessage, users: Member[], channel: Channel): WebhookMessageCreateOptions {
+	if(message.subtype === 'channel_join') {
+		const user = users.find(u => u.id === message.user)
+		return {
+			username: getUserName(user?.profile),
+			avatarURL: user?.profile?.image_72,
+			content: italic(`joined <#${channel.id}>`)
+		}
+	}
+
 	return {
-		username: message.user_profile?.real_name ?? message.user_profile?.display_name ?? 'Slack User',
+		username: getUserName(message.user_profile),
 		avatarURL: message.user_profile?.image_72,
-		content: message.text
+		content: parseMentions(message.text ?? '_empty message_', users)
 	}
 }
 
@@ -86,6 +103,7 @@ client.once(Events.ClientReady, async () => {
 	const guild = client.guilds.cache.get(argv.guild)
 	if(!guild) throw new Error(`guild ${argv.guild} doesn't exist (or this bot doesn't have access to it)`)
 
+	const slackUsers = await readUsers()
 	const slackChannels = await readChannels()
 	if(!slackChannels) throw new Error(`couldn't read Slack archive channels.json`)
 
@@ -118,15 +136,20 @@ client.once(Events.ClientReady, async () => {
 			for(const message of messages) {
 				try {
 					await logger.logPromise(
-						webhook.send(renderDiscordMessage(message)),
+						webhook.send(renderDiscordMessage(message, slackUsers, discordChannel)),
 						`sending message ${message.text}`
 					)
-				} catch {
-
+				} catch(error) {
+					// TODO retry if it's a connection error
+					if(error instanceof Error) {
+						await fs.writeFile(path.join('src', 'fixtures', `${message.ts}.json`), JSON.stringify({error: error.stack, message}, null, '\t'))
+					}
 				}
 			}
 		}
 	}))
+
+	client.destroy()
 })
 
 client.login(argv.token)
