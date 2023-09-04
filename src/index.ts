@@ -18,7 +18,12 @@ async function readChannels(): Promise<Slack.ChannelsListResponse['channels']> {
 	return JSON.parse(await fs.readFile(path.join(argv.archive, 'channels.json'), 'utf-8'))
 }
 
-async function readChannelMessages(channel: string): Promise<Slack.ChannelsHistoryResponse['messages']> {
+type ArrayElement<ArrayType extends readonly unknown[]> =
+  ArrayType extends readonly (infer ElementType)[] ? ElementType : never;
+
+type SlackMessage = ArrayElement<Exclude<Slack.ChannelsHistoryResponse['messages'], undefined>> & { user_profile: Slack.UsersProfileGetResponse['profile'] }
+
+async function readChannelMessages(channel: string): Promise<SlackMessage[]> {
 	const channelDir = path.join(argv.archive, channel)
 	const archives = await fs.readdir(channelDir)
 
@@ -35,7 +40,7 @@ async function readUsers(): Promise<Slack.UsersListResponse['members']> {
 	return JSON.parse(await fs.readFile(path.join(argv.archive, 'users.json'), 'utf-8'))
 }
 
-import {CategoryChannel, Channel, ChannelType, Client, Events, GatewayIntentBits, Guild, GuildChannelCreateOptions, TextChannel, Webhook} from 'discord.js'
+import {CategoryChannel, Channel, ChannelType, Client, Events, GatewayIntentBits, Guild, GuildChannelCreateOptions, Message, MessagePayload, TextChannel, Webhook, WebhookMessageCreateOptions} from 'discord.js'
 
 import Logger from 'komatsu'
 const logger = new Logger()
@@ -68,6 +73,15 @@ async function createOrReturnChannel(guild: Guild, options: GuildChannelCreateOp
 	}
 }
 
+// TODO: rich text, files, timestamps, reactions
+function renderDiscordMessage(message: SlackMessage): WebhookMessageCreateOptions {
+	return {
+		username: message.user_profile?.real_name ?? message.user_profile?.display_name ?? 'Slack User',
+		avatarURL: message.user_profile?.image_72,
+		content: message.text
+	}
+}
+
 client.once(Events.ClientReady, async () => {
 	const guild = client.guilds.cache.get(argv.guild)
 	if(!guild) throw new Error(`guild ${argv.guild} doesn't exist (or this bot doesn't have access to it)`)
@@ -92,18 +106,26 @@ client.once(Events.ClientReady, async () => {
 	}))
 
 	await Promise.all(slackChannels.map(async channel => {
-		// const messages = await readChannelMessages(channel)
-		const discordChannel = guild.channels.cache.find(c => c.name === channel)
+		if(!channel.name) return
+		const messages = await readChannelMessages(channel.name)
+		const discordChannel = guild.channels.cache.find(c => c.name === channel.name)
 
-		if(discordChannel && discordChannel.type === ChannelType.GuildText) {
-			console.log(await getWebhook(discordChannel))
+		console.log({channel, messages: messages.length, discordChannel})
+
+		if(messages && discordChannel && discordChannel.type === ChannelType.GuildText) {
+			const webhook = await getWebhook(discordChannel)
+
+			for(const message of messages) {
+				try {
+					await logger.logPromise(
+						webhook.send(renderDiscordMessage(message)),
+						`sending message ${message.text}`
+					)
+				} catch {
+
+				}
+			}
 		}
-
-		// for(const message of messages) {
-		// 	await logger.logPromise(
-		// 		discordChannel.
-		// 	)
-		// }
 	}))
 })
 
