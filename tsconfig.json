@@ -1,7 +1,15 @@
 {
 	"extends": "@tsconfig/node18",
+	"ts-node": {
+		"files": true
+	},
+	"include": [
+		"src"
+	],
 	"compilerOptions": {
 		"outDir": "lib",
-		"rootDir": "src"
+		"rootDir": "src",
+		"module": "NodeNext",
+		"resolveJsonModule": true
 	}
 }
